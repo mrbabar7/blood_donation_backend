@@ -1,0 +1,23 @@
+const express = require("express");
+const router = express.Router();
+const { protect } = require("../middlewares/authMiddleware");
+const {
+  getCallHistory,
+  deleteCall,
+  clearCallHistory,
+  getCallState,
+  acceptCallRest,
+  declineCallRest,
+  tick,
+} = require("../controllers/callController");
+
+router.all("/internal/tick", tick);
+router.get("/history", protect, getCallHistory);
+// Authoritative call state for push/notification handling (see callController).
+router.get("/:id/state", protect, getCallState);
+router.post("/:id/accept", protect, acceptCallRest);
+router.post("/:id/decline", protect, declineCallRest);
+router.delete("/", protect, clearCallHistory);
+router.delete("/:id", protect, deleteCall);
+
+module.exports = router;
