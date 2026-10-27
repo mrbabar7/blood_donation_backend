@@ -1,15 +1,3 @@
-// Expo push delivery (expo-server-sdk) for chat notifications.
-//
-// The app's other pushes (blood requests, calls, admin broadcasts) go through
-// Firebase Admin using the device's native FCM token — that path is untouched.
-// Chat pushes prefer an Expo push token when the recipient has registered one
-// (User.expoPushToken) and fall back to the FCM path otherwise, so a device is
-// only ever notified through ONE transport per message (no duplicates).
-//
-// expo-server-sdk has shipped as both CJS and ESM across major versions, so it
-// is loaded defensively; if it cannot be loaded at all, every call here simply
-// reports "not sent" and the caller falls back to FCM.
-
 let ExpoClass = null;
 let expoClient = null;
 
@@ -23,7 +11,9 @@ const loadExpo = async () => {
   }
   ExpoClass = lib.Expo || (lib.default && lib.default.Expo) || lib.default;
   expoClient = new ExpoClass(
-    process.env.EXPO_ACCESS_TOKEN ? { accessToken: process.env.EXPO_ACCESS_TOKEN } : {},
+    process.env.EXPO_ACCESS_TOKEN
+      ? { accessToken: process.env.EXPO_ACCESS_TOKEN }
+      : {},
   );
   return { Expo: ExpoClass, client: expoClient };
 };
@@ -46,11 +36,20 @@ const scheduleReceiptCheck = (ticketId, token, onInvalidToken) => {
   const timer = setTimeout(async () => {
     try {
       const { client } = await loadExpo();
-      const receipts = await client.getPushNotificationReceiptsAsync([ticketId]);
+      const receipts = await client.getPushNotificationReceiptsAsync([
+        ticketId,
+      ]);
       const receipt = receipts[ticketId];
       if (receipt?.status === "error") {
-        console.error("[expo-push] receipt error:", receipt.message, receipt.details);
-        if (receipt.details?.error === "DeviceNotRegistered" && onInvalidToken) {
+        console.error(
+          "[expo-push] receipt error:",
+          receipt.message,
+          receipt.details,
+        );
+        if (
+          receipt.details?.error === "DeviceNotRegistered" &&
+          onInvalidToken
+        ) {
           await onInvalidToken(token);
         }
       }
@@ -66,9 +65,14 @@ const scheduleReceiptCheck = (ticketId, token, onInvalidToken) => {
  * Resolves { sent: boolean, invalidToken?: boolean, error?: string }.
  * `sent` is true only when Expo accepted the message (ticket status "ok").
  */
-const sendExpoPush = async (token, { title, body, data = {}, channelId = "high_importance_v1" }, onInvalidToken) => {
+const sendExpoPush = async (
+  token,
+  { title, body, data = {}, channelId = "high_importance_v1" },
+  onInvalidToken,
+) => {
   try {
-    if (!(await isValidExpoToken(token))) return { sent: false, error: "invalid-expo-token" };
+    if (!(await isValidExpoToken(token)))
+      return { sent: false, error: "invalid-expo-token" };
     const { client } = await loadExpo();
 
     const message = {
@@ -95,8 +99,13 @@ const sendExpoPush = async (token, { title, body, data = {}, channelId = "high_i
 
     const code = ticket.details?.error;
     console.error("[expo-push] ticket error:", ticket.message, ticket.details);
-    if (code === "DeviceNotRegistered" && onInvalidToken) await onInvalidToken(token);
-    return { sent: false, invalidToken: code === "DeviceNotRegistered", error: code || ticket.message };
+    if (code === "DeviceNotRegistered" && onInvalidToken)
+      await onInvalidToken(token);
+    return {
+      sent: false,
+      invalidToken: code === "DeviceNotRegistered",
+      error: code || ticket.message,
+    };
   } catch (err) {
     console.error("[expo-push] send failed:", err.message);
     return { sent: false, error: err.message };

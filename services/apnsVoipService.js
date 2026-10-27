@@ -1,20 +1,3 @@
-// ============================================================================
-// Direct APNs (HTTP/2, token auth) sender for iOS PushKit VoIP pushes.
-//
-// Why: Firebase (FCM) can only address FCM registration tokens. The token the
-// app saves from react-native-voip-push-notification is a raw PushKit token,
-// which only APNs itself understands — so a VoIP push has to go to APNs
-// directly. No new dependency: Node's built-in `http2` + `crypto` (ES256 JWT).
-//
-// Enabled only when ALL of these env vars are set (otherwise the caller keeps
-// its previous behaviour, so nothing changes until you configure it):
-//   APNS_KEY_ID      10-char Key ID of the .p8 Auth Key
-//   APNS_TEAM_ID     10-char Apple Team ID
-//   APNS_AUTH_KEY    contents of the .p8 (PEM, "\n" escapes allowed) or its base64
-//   IOS_BUNDLE_ID    app bundle id (topic is "<bundle>.voip")
-//   APNS_PRODUCTION  "true" (default when NODE_ENV=production) | "false" for sandbox
-// A token from a Debug/TestFlight-sandbox build needs APNS_PRODUCTION=false.
-// ============================================================================
 const crypto = require("crypto");
 
 const b64url = (buf) => Buffer.from(buf).toString("base64url");
@@ -33,8 +16,12 @@ const readKey = (raw) => {
 
 const config = (env = process.env) => {
   const key = readKey(env.APNS_AUTH_KEY);
-  if (!env.APNS_KEY_ID || !env.APNS_TEAM_ID || !key || !env.IOS_BUNDLE_ID) return null;
-  const prod = env.APNS_PRODUCTION != null ? env.APNS_PRODUCTION === "true" : env.NODE_ENV === "production";
+  if (!env.APNS_KEY_ID || !env.APNS_TEAM_ID || !key || !env.IOS_BUNDLE_ID)
+    return null;
+  const prod =
+    env.APNS_PRODUCTION != null
+      ? env.APNS_PRODUCTION === "true"
+      : env.NODE_ENV === "production";
   return {
     keyId: env.APNS_KEY_ID,
     teamId: env.APNS_TEAM_ID,
@@ -50,10 +37,20 @@ const isConfigured = (env = process.env) => !!config(env);
 // with the raw r||s signature JWT requires (dsaEncoding: ieee-p1363).
 let cachedJwt = null;
 const providerToken = (cfg, nowMs = Date.now()) => {
-  if (cachedJwt && cachedJwt.keyId === cfg.keyId && nowMs - cachedJwt.at < 50 * 60 * 1000) return cachedJwt.token;
+  if (
+    cachedJwt &&
+    cachedJwt.keyId === cfg.keyId &&
+    nowMs - cachedJwt.at < 50 * 60 * 1000
+  )
+    return cachedJwt.token;
   const header = b64url(JSON.stringify({ alg: "ES256", kid: cfg.keyId }));
-  const claims = b64url(JSON.stringify({ iss: cfg.teamId, iat: Math.floor(nowMs / 1000) }));
-  const sig = crypto.sign("sha256", Buffer.from(`${header}.${claims}`), { key: cfg.key, dsaEncoding: "ieee-p1363" });
+  const claims = b64url(
+    JSON.stringify({ iss: cfg.teamId, iat: Math.floor(nowMs / 1000) }),
+  );
+  const sig = crypto.sign("sha256", Buffer.from(`${header}.${claims}`), {
+    key: cfg.key,
+    dsaEncoding: "ieee-p1363",
+  });
   const token = `${header}.${claims}.${b64url(sig)}`;
   cachedJwt = { token, at: nowMs, keyId: cfg.keyId };
   return token;
@@ -77,7 +74,11 @@ const buildVoipRequest = ({ cfg, deviceToken, data, nowMs = Date.now() }) => ({
   body: JSON.stringify({ ...data, aps: { "content-available": 1 } }),
 });
 
-const sendVoip = (deviceToken, data, { env = process.env, timeoutMs = 8000 } = {}) =>
+const sendVoip = (
+  deviceToken,
+  data,
+  { env = process.env, timeoutMs = 8000 } = {},
+) =>
   new Promise((resolve) => {
     const cfg = config(env);
     if (!cfg) return resolve({ sent: false, reason: "not_configured" });
@@ -96,8 +97,12 @@ const sendVoip = (deviceToken, data, { env = process.env, timeoutMs = 8000 } = {
     try {
       const req = buildVoipRequest({ cfg, deviceToken, data });
       client = require("http2").connect(`https://${cfg.host}`);
-      client.on("error", (err) => done({ sent: false, reason: err.code || err.message }));
-      client.setTimeout(timeoutMs, () => done({ sent: false, reason: "timeout" }));
+      client.on("error", (err) =>
+        done({ sent: false, reason: err.code || err.message }),
+      );
+      client.setTimeout(timeoutMs, () =>
+        done({ sent: false, reason: "timeout" }),
+      );
       const stream = client.request(req.headers);
       let status = 0;
       let body = "";
@@ -118,11 +123,19 @@ const sendVoip = (deviceToken, data, { env = process.env, timeoutMs = 8000 } = {
         }
         done({ sent: false, status, reason: reason || `http_${status}` });
       });
-      stream.on("error", (err) => done({ sent: false, reason: err.code || err.message }));
+      stream.on("error", (err) =>
+        done({ sent: false, reason: err.code || err.message }),
+      );
       stream.end(req.body);
     } catch (err) {
       done({ sent: false, reason: err.message });
     }
   });
 
-module.exports = { isConfigured, config, providerToken, buildVoipRequest, sendVoip };
+module.exports = {
+  isConfigured,
+  config,
+  providerToken,
+  buildVoipRequest,
+  sendVoip,
+};

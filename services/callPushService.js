@@ -1,21 +1,3 @@
-// ============================================================================
-// Push delivery for the call lifecycle. Pure payload builders (unit-tested) +
-// thin senders. Nothing here throws: a push failure must never break a call.
-//
-// Message types (data.type):
-//   INCOMING_CALL   data-only, HIGH priority, TTL <= remaining ring window.
-//                   The app's background handler turns it into a Notifee
-//                   notification with Accept / Decline (Android) after
-//                   re-validating the call. iOS gets an alert push (and the
-//                   VoIP/CallKit path when a PushKit token is registered).
-//   CALL_CANCELLED  data-only. Caller hung up / call answered elsewhere /
-//                   expired: remove the still-visible ringing notification.
-//   MISSED_CALL     visible notification { type, callerId, callerName,
-//                   timestamp }. Tap opens Call History — never CallScreen.
-//   CALL_DECLINED   visible notification to a caller who is not connected.
-//
-// FCM data values must be strings — see stringifyData.
-// ============================================================================
 const callState = require("./callStateService");
 
 const HIGH_IMPORTANCE_CHANNEL = "high_importance_v1";
@@ -54,9 +36,19 @@ const buildIncomingCallData = ({ call, callerName, now = new Date() }) => ({
 // stricter still, but Android FCM only honours it for collapsible messages and
 // can drop a ring that is a second away from delivery; the remaining-window TTL
 // is the documented fallback.) apns-expiration is an absolute unix time.
-const buildIncomingCallMessage = ({ token, call, callerName, now = new Date(), title, body }) => {
+const buildIncomingCallMessage = ({
+  token,
+  call,
+  callerName,
+  now = new Date(),
+  title,
+  body,
+}) => {
   const ttlMs = callState.remainingMs(call, now);
-  const data = stringifyData({ ...buildIncomingCallData({ call, callerName, now }), ttlMs });
+  const data = stringifyData({
+    ...buildIncomingCallData({ call, callerName, now }),
+    ttlMs,
+  });
   const expirySeconds = Math.floor((new Date(now).getTime() + ttlMs) / 1000);
   return {
     token,
@@ -78,7 +70,12 @@ const buildIncomingCallMessage = ({ token, call, callerName, now = new Date(), t
       },
       payload: {
         aps: {
-          alert: { title: title || (callerName ? `${callerName} is calling…` : "Incoming call"), body: body || "Tap to answer" },
+          alert: {
+            title:
+              title ||
+              (callerName ? `${callerName} is calling…` : "Incoming call"),
+            body: body || "Tap to answer",
+          },
           sound: "default",
           "content-available": 1,
           "interruption-level": "time-sensitive",
@@ -90,10 +87,19 @@ const buildIncomingCallMessage = ({ token, call, callerName, now = new Date(), t
 
 const buildCancelMessage = ({ token, call, reason }) => ({
   token,
-  data: stringifyData({ type: "CALL_CANCELLED", callId: String(call._id), requestId: String(call.requestId), reason: reason || "" }),
+  data: stringifyData({
+    type: "CALL_CANCELLED",
+    callId: String(call._id),
+    requestId: String(call.requestId),
+    reason: reason || "",
+  }),
   android: { priority: "high", ttl: 60_000, collapseKey: `call_${call._id}` },
   apns: {
-    headers: { "apns-push-type": "background", "apns-priority": "5", "apns-expiration": String(Math.floor(Date.now() / 1000) + 60) },
+    headers: {
+      "apns-push-type": "background",
+      "apns-priority": "5",
+      "apns-expiration": String(Math.floor(Date.now() / 1000) + 60),
+    },
     payload: { aps: { "content-available": 1 } },
   },
 });
@@ -112,10 +118,21 @@ const buildMissedCallMessage = ({ token, payload }) => {
       priority: "high",
       ttl: MISSED_TTL_MS,
       collapseKey: `missed_${payload.callerId}`,
-      notification: { title, body, sound: "default", channelId: HIGH_IMPORTANCE_CHANNEL, visibility: "public", tag: `missed_${payload.callId}` },
+      notification: {
+        title,
+        body,
+        sound: "default",
+        channelId: HIGH_IMPORTANCE_CHANNEL,
+        visibility: "public",
+        tag: `missed_${payload.callId}`,
+      },
     },
     apns: {
-      headers: { "apns-expiration": String(Math.floor(Date.now() / 1000) + MISSED_TTL_MS / 1000) },
+      headers: {
+        "apns-expiration": String(
+          Math.floor(Date.now() / 1000) + MISSED_TTL_MS / 1000,
+        ),
+      },
       payload: { aps: { sound: "default", "thread-id": "missed-calls" } },
     },
   };
@@ -123,9 +140,22 @@ const buildMissedCallMessage = ({ token, payload }) => {
 
 const buildDeclinedMessage = ({ token, call, calleeName }) => ({
   token,
-  notification: { title: "Call declined", body: calleeName ? `${calleeName} declined your call` : "Your call was declined" },
-  data: stringifyData({ type: "CALL_DECLINED", callId: String(call._id), requestId: String(call.requestId) }),
-  android: { priority: "high", ttl: 60_000, notification: { channelId: HIGH_IMPORTANCE_CHANNEL, sound: "default" } },
+  notification: {
+    title: "Call declined",
+    body: calleeName
+      ? `${calleeName} declined your call`
+      : "Your call was declined",
+  },
+  data: stringifyData({
+    type: "CALL_DECLINED",
+    callId: String(call._id),
+    requestId: String(call.requestId),
+  }),
+  android: {
+    priority: "high",
+    ttl: 60_000,
+    notification: { channelId: HIGH_IMPORTANCE_CHANNEL, sound: "default" },
+  },
 });
 
 // ---- senders -----------------------------------------------------------------
@@ -146,34 +176,72 @@ const safeSend = async (message, label, messaging = getMessaging()) => {
 // Re-checks the call against the DB RIGHT BEFORE sending: a push is only ever a
 // signal for a call that is still ringing and unexpired. `fetchCall` is
 // injectable for tests.
-const sendIncomingCallPush = async ({ callId, callee, callerName, now = new Date(), fetchCall, messaging }) => {
+const sendIncomingCallPush = async ({
+  callId,
+  callee,
+  callerName,
+  now = new Date(),
+  fetchCall,
+  messaging,
+}) => {
   const token = pickToken(callee);
   if (!token) return { sent: false, reason: "no_token" };
-  const call = await (fetchCall ? fetchCall(callId) : require("../models/callModel").findById(callId));
+  const call = await (fetchCall
+    ? fetchCall(callId)
+    : require("../models/callModel").findById(callId));
   if (!call) return { sent: false, reason: "no_call" };
-  if (!callState.isRinging(call, now)) return { sent: false, reason: "not_ringing" };
-  if (callState.remainingMs(call, now) < MIN_RING_TTL_MS) return { sent: false, reason: "too_late" };
-  const res = await safeSend(buildIncomingCallMessage({ token, call, callerName, now }), "incoming-call", messaging);
+  if (!callState.isRinging(call, now))
+    return { sent: false, reason: "not_ringing" };
+  if (callState.remainingMs(call, now) < MIN_RING_TTL_MS)
+    return { sent: false, reason: "too_late" };
+  const res = await safeSend(
+    buildIncomingCallMessage({ token, call, callerName, now }),
+    "incoming-call",
+    messaging,
+  );
   return { ...res, reason: res.sent ? "sent" : "send_failed" };
 };
 
 const sendCallCancelledPush = async ({ call, callee, reason, messaging }) => {
   const token = pickToken(callee);
   if (!token || !call) return { sent: false, reason: "no_token" };
-  return safeSend(buildCancelMessage({ token, call, reason }), "call-cancelled", messaging);
+  return safeSend(
+    buildCancelMessage({ token, call, reason }),
+    "call-cancelled",
+    messaging,
+  );
 };
 
-const sendMissedCallPush = async ({ call, callee, callerName, now = new Date(), messaging }) => {
+const sendMissedCallPush = async ({
+  call,
+  callee,
+  callerName,
+  now = new Date(),
+  messaging,
+}) => {
   const token = pickToken(callee);
   if (!token || !call) return { sent: false, reason: "no_token" };
   const payload = callState.buildMissedCallPayload({ call, callerName, now });
-  return safeSend(buildMissedCallMessage({ token, payload }), "missed-call", messaging);
+  return safeSend(
+    buildMissedCallMessage({ token, payload }),
+    "missed-call",
+    messaging,
+  );
 };
 
-const sendCallDeclinedPush = async ({ call, caller, calleeName, messaging }) => {
+const sendCallDeclinedPush = async ({
+  call,
+  caller,
+  calleeName,
+  messaging,
+}) => {
   const token = pickToken(caller);
   if (!token || !call) return { sent: false, reason: "no_token" };
-  return safeSend(buildDeclinedMessage({ token, call, calleeName }), "call-declined", messaging);
+  return safeSend(
+    buildDeclinedMessage({ token, call, calleeName }),
+    "call-declined",
+    messaging,
+  );
 };
 
 module.exports = {

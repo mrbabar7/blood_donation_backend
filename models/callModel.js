@@ -1,18 +1,25 @@
 const mongoose = require("mongoose");
 
-// Backs the "Calls" tab / call history screen (REQUIREMENT 3). One document
-// per call *attempt* — created the moment call:invite fires (see
-// services/socketService.js), then updated in place as that same call
-// progresses through ringing -> accepted/rejected/missed -> (if accepted)
-// completed. Deliberately a new document per attempt rather than one row per
-// requestId, same "every event is its own row" shape WhatsApp/native phone
-// call logs use — re-calling the same match twice produces two rows, not one
-// row that gets overwritten.
 const callSchema = new mongoose.Schema(
   {
-    requestId: { type: mongoose.Schema.Types.ObjectId, ref: "DonationRequest", required: true, index: true },
-    callerId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
-    calleeId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    requestId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "DonationRequest",
+      required: true,
+      index: true,
+    },
+    callerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+    calleeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
     status: {
       type: String,
       enum: ["ringing", "accepted", "rejected", "missed", "busy", "completed"],
