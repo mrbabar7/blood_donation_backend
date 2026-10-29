@@ -382,11 +382,16 @@
 //             voipSent = !!voipRes;
 //           }
 //           if (!voipSent) {
-//             await callPush.sendIncomingCallPush({
+//             const pushRes = await callPush.sendIncomingCallPush({
 //               callId: created._id,
 //               callee,
 //               callerName: fromName || "",
 //             });
+//             console.log(
+//               "[call] incoming-call push result for",
+//               String(toUserId),
+//               JSON.stringify(pushRes),
+//             );
 //           }
 //         } else {
 //           // DB unavailable: keep the legacy notification so the call still rings.
@@ -1348,6 +1353,9 @@ const initSocket = (server) => {
               callId: created._id,
               callee,
               callerName: fromName || "",
+              // A live socket means the in-app ring is handling it: no visible fallback needed.
+              isCalleeOnline: async () =>
+                (await presence.count(String(toUserId))) > 0,
             });
             console.log(
               "[call] incoming-call push result for",
